@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+download1() {
+  version="$1"
+  cpu_arch="$2"
+  extra="$3"
+  dest="mysql-${version}.tar.gz"
+  url="https://downloads.mysql.com/archives/get/p/23/file/mysql-${version}-${extra}-${cpu_arch}.tar.gz"
+  echo "Try downloading from ${url} ..."
+  out=$(curl --fail -w '%{http_code}' -Lo "${dest}" "${url}")
+  [[ ${out} == '200' ]]
+}
+
+download() {
+  version="$1"
+  cpu_arch="$2"
+  extras="$3"
+  for extra in ${extras}; do
+    if download1 "${version}" "${cpu_arch}" "${extra}"; then
+      break
+    fi
+  done
+  if ! [[ -f "mysql-${version}.tar.gz" ]]; then
+    echo "No appropriate tar file found for version:${version}, cpu_arch:${cpu_arch}."
+    exit 1
+  fi
+}
+
+install() {
+  version="$1"
+  install_path="$2"
+
+  major="$(echo "${version}" | cut -d. -f1)"
+  minor="$(echo "${version}" | cut -d. -f2)"
+  patch="$(echo "${version}" | cut -d. -f3)"
+
+  case "$(uname -s)" in
+    Linux)
+      cpu_arch="$(arch)"
+      extras='linux-glibc2.17 linux-glibc2.12 linux-glibc2.5'
+      ;;
+    Darwin)
+      case "$(arch)" in
+        i386)
+          cpu_arch='x86_64'
+          ;;
+        *)
+          cpu_arch='arm64'
+          if (( major < 8 )) || (( major == 8 )) && (( minor == 0 )) && (( patch <= 25 )); then
+            echo 'Error: pre-built binaries are not available for ARM prior to 8.0.26'
+            exit 1
+          fi
+          ;;
+      esac
+      extras='macos11 macos10.14 macos10.13 macos10.12 osx10.11 osx10.10 osx10.9 osx10.8 osx10.7 osx10.6'
+      ;;
+  esac
+
+  tmpdir=$(mktemp -d)
+  (
+    cd "${tmpdir}"
+    download "${version}" "${cpu_arch}" "${extras}"
+    tgz="mysql-${version}.tar.gz"
+    tar -zxf "${tgz}"
+    rm "${tgz}"
+    mv mysql-*/* "${install_path}"
+  )
+  rm -rf "${tmpdir}"
+  echo Successfully installed MySQL "${version}"
+}
+
+install "${ASDF_INSTALL_VERSION}" "${ASDF_INSTALL_PATH}"
